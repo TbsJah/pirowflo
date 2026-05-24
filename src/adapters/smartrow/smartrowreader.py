@@ -1,7 +1,7 @@
 import gatt
 import logging
 import threading
-from time import time
+from time import time, sleep
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,9 @@ class SmartRow(gatt.Device):
 
     def connect_failed(self, error):
         super().connect_failed(error)
-        logger.info("Connection failed [{}]: {}".format(self.mac_address, error))
+        logger.info("Connection failed [{}]: {} — retrying in 2s".format(self.mac_address, error))
+        sleep(2)
+        self.connect()
 
     def disconnect_succeeded(self):
         super().disconnect_succeeded()
@@ -72,8 +74,16 @@ class SmartRow(gatt.Device):
         
     def characteristic_value_updated(self, characteristic, value):
         super().characteristic_value_updated(characteristic, value)
-        self.buffer = value.decode()
-        self.notify_callbacks(self.buffer)
+        try:
+            decoded = value.decode('latin-1')
+        except Exception as e:
+            logger.warning("decode error: %s raw: %s", e, value.hex())
+            return
+        # SmartRow packs multiple \r-terminated messages into one notification
+        for part in decoded.split('\r'):
+            part = part.strip('\n')
+            if part:
+                self.notify_callbacks(part)
 
 
     def characteristic_write_value(self, value):
@@ -102,25 +112,40 @@ class SmartRowManager(gatt.DeviceManager):
             return self.discovered
         
     def device_discovered(self, device):
+        logger.info("discovered: alias=%s mac=%s", device.alias(), device.mac_address)
         if device.alias() == "SmartRow":
             logging.info("found SmartRow")
             logging.info(device.mac_address)
             self.smartrowmac = device.mac_address
-            self.stop()
-            with self.lock: #"Lock Acquired"
-                self.discovered=True
+            with self.lock:
+                self.discovered = True
+            try:
+                self.stop()
+            except Exception:
+                pass  # stop() fails if run() hasn't been called yet (device in BlueZ cache)
 
 
 def connecttosmartrow():
     manager = SmartRowManager(adapter_name='hci0')
     logger.info("starting discovery")
-    manager.start_discovery()  # from the DeviceManager class call the methode start_discorvery
+
+    # Device may already be known from BlueZ cache (found during __init__)
+    if manager.ready():
+        logger.info("SmartRow found in BlueZ cache: %s", manager.smartrowmac)
+        return manager.smartrowmac
+
+    # Also check device list directly
+    for device in manager.devices():
+        if device.alias() == "SmartRow":
+            logger.info("SmartRow already known: %s", device.mac_address)
+            return device.mac_address
+
+    manager.start_discovery()
     manager.run()
-    while not manager.ready(): # hold the thread locked a checks if SmartRow has been found. Then gives other process 0.2 sec time to work
+    while not manager.ready():
         time.sleep(0.2)
     logger.info("found SmartRow macaddress")
-    macaddresssmartrower = manager.smartrowmac    
-    return macaddresssmartrower
+    return manager.smartrowmac
 
 
 if __name__ == '__main__':
