@@ -5,6 +5,7 @@ After=network.target
 [Service]
 User=pi
 Group=pi
+Environment=PATH=/home/pi/pirowflo/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/home/pi/pirowflo/venv/bin/python3 /home/pi/pirowflo/src/adapters/screen/oled.py
 KillMode=process
 
