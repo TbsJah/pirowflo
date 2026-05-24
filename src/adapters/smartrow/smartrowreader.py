@@ -114,8 +114,18 @@ class SmartRowManager(gatt.DeviceManager):
     def device_discovered(self, device):
         try:
             alias = device.alias()
-        except Exception:
-            return  # device properties not yet available, ignore
+        except Exception as e:
+            logger.info("device_discovered: alias() failed for %s (%s) — retrying", device.mac_address, e)
+            # Properties not yet loaded; try again via devices() scan
+            try:
+                for d in self.devices():
+                    if d.mac_address == device.mac_address:
+                        alias = d.alias()
+                        break
+                else:
+                    return
+            except Exception:
+                return
         logger.info("discovered: alias=%s mac=%s", alias, device.mac_address)
         if alias == "SmartRow":
             logging.info("found SmartRow")
@@ -140,10 +150,16 @@ def connecttosmartrow():
 
     # Also check device list directly
     for device in manager.devices():
-        if device.alias() == "SmartRow":
+        try:
+            alias = device.alias()
+        except Exception:
+            alias = ""
+        logger.info("known device: alias=%s mac=%s", alias, device.mac_address)
+        if alias == "SmartRow":
             logger.info("SmartRow already known: %s", device.mac_address)
             return device.mac_address
 
+    logger.info("starting BLE scan on hci0")
     manager.start_discovery()
     manager.run()
     while not manager.ready():
