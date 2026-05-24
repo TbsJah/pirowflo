@@ -106,7 +106,26 @@ class SmartRowManager(gatt.DeviceManager):
     def __init__(self,*args,**kwargs):
         gatt.DeviceManager.__init__(self, *args, **kwargs)
         self.lock = threading.Lock()
-        self.discovered=False 
+        self.discovered=False
+
+    def start_discovery(self):
+        """Override gatt's default Transport:le filter with Transport:auto.
+
+        gatt hardcodes SetDiscoveryFilter({'Transport': 'le'}) which is known
+        to produce zero results on BCM43438 (Pi Zero W / Pi 3B, UART bus) with
+        BlueZ 5.66 – the call succeeds but no InterfacesAdded signals arrive.
+        bluetoothctl uses Transport:auto and reliably finds BLE devices on the
+        same hardware, so we mirror that behaviour here.
+        """
+        try:
+            self._adapter.SetDiscoveryFilter({'Transport': 'auto'})
+            self._adapter.StartDiscovery()
+        except Exception as e:
+            dbus_name = getattr(e, 'get_dbus_name', lambda: '')()
+            if dbus_name == 'org.bluez.Error.InProgress':
+                pass
+            else:
+                raise
 
     def ready(self):
         with self.lock:
