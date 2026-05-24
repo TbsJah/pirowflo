@@ -188,7 +188,7 @@ def main(in_q, ble_out_q,ant_out_q):
     while not smartrow.ready() :
       sleep(0.2)
 
-    print("starting heart beat")
+    logger.info("starting heart beat")
     HB = threading.Thread(target=heartbeat, args=([smartrow]))
     HB.daemon = True
     HB.start()
