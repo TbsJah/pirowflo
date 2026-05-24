@@ -1,5 +1,6 @@
 import gatt
 import logging
+import os
 import threading
 from time import time, sleep
 
@@ -139,6 +140,30 @@ class SmartRowManager(gatt.DeviceManager):
                 pass  # stop() fails if run() hasn't been called yet (device in BlueZ cache)
 
 
+_MAC_CACHE_FILE = '/tmp/pirowflo_smartrow_mac'
+
+
+def _save_smartrow_mac(mac):
+    try:
+        with open(_MAC_CACHE_FILE, 'w') as f:
+            f.write(mac)
+        logger.info("SmartRow MAC cached to %s", _MAC_CACHE_FILE)
+    except Exception as e:
+        logger.warning("could not cache SmartRow MAC: %s", e)
+
+
+def _load_smartrow_mac():
+    try:
+        if os.path.exists(_MAC_CACHE_FILE):
+            with open(_MAC_CACHE_FILE) as f:
+                mac = f.read().strip()
+            if mac:
+                return mac
+    except Exception as e:
+        logger.warning("could not read SmartRow MAC cache: %s", e)
+    return None
+
+
 def connecttosmartrow():
     manager = SmartRowManager(adapter_name='hci0')
     logger.info("starting discovery")
@@ -147,18 +172,9 @@ def connecttosmartrow():
     if not manager.is_adapter_powered:
         logger.info("hci0 not powered – powering on")
         manager.is_adapter_powered = True
-        time.sleep(1)
+        sleep(1)
 
-    # Stop any stale discovery that a previous (crashed) run may have left on hci0.
-    # gatt silently swallows InProgress but BlueZ won't re-emit already-seen devices
-    # when the signal receivers are brand-new, so we need a clean start.
-    try:
-        manager.stop_discovery()
-        logger.info("stopped stale discovery on hci0")
-    except Exception:
-        pass  # Nothing was running – that's fine
-
-    # Also check device list directly (BlueZ cache from a previous scan)
+    # Check BlueZ device cache first (fastest – no scan needed)
     for device in manager.devices():
         try:
             alias = device.alias()
@@ -166,15 +182,34 @@ def connecttosmartrow():
             alias = ""
         logger.info("known device: alias=%s mac=%s", alias, device.mac_address)
         if alias == "SmartRow":
-            logger.info("SmartRow already known: %s", device.mac_address)
+            logger.info("SmartRow already known to BlueZ: %s", device.mac_address)
+            _save_smartrow_mac(device.mac_address)
             return device.mac_address
 
-    logger.info("starting BLE scan on hci0")
+    # Use MAC cached from a previous successful session – allows BlueZ to
+    # connect directly once SmartRow wakes up, without a full scan.
+    cached_mac = _load_smartrow_mac()
+    if cached_mac:
+        logger.info("SmartRow MAC loaded from cache (%s) – skipping scan", cached_mac)
+        logger.info("Waiting for SmartRow to advertise – pull the handle to wake it up")
+        return cached_mac
+
+    # No cache: stop any stale discovery and do a fresh scan.
+    # gatt silently swallows InProgress but BlueZ won't re-emit already-seen
+    # devices to brand-new signal receivers, so we need a clean start.
+    try:
+        manager.stop_discovery()
+        logger.info("stopped stale discovery on hci0")
+    except Exception:
+        pass  # Nothing was running – that's fine
+
+    logger.info("starting BLE scan on hci0 – pull the SmartRow handle to wake it up")
     manager.start_discovery()
     manager.run()
     while not manager.ready():
-        time.sleep(0.2)
-    logger.info("found SmartRow macaddress")
+        sleep(0.2)
+    logger.info("found SmartRow macaddress: %s", manager.smartrowmac)
+    _save_smartrow_mac(manager.smartrowmac)
     return manager.smartrowmac
 
 
