@@ -80,13 +80,18 @@ def add_event_detect(
 
     bounce_s = (bouncetime / 1000.0) if bouncetime else 0.0
     last_call = [0.0]
+    # Suppress callbacks for the first 2 s after registration to avoid
+    # spurious RISING edges from pull-up settling on startup.
+    start_time = time.monotonic()
+    STARTUP_SUPPRESS_S = 2.0
 
     def _wrapped(gpio: int, level: int, tick: int) -> None:
-        if bounce_s > 0:
-            now = time.monotonic()
-            if now - last_call[0] < bounce_s:
-                return
-            last_call[0] = now
+        now = time.monotonic()
+        if now - start_time < STARTUP_SUPPRESS_S:
+            return
+        if bounce_s > 0 and now - last_call[0] < bounce_s:
+            return
+        last_call[0] = now
         if callback:
             callback(gpio)
 
