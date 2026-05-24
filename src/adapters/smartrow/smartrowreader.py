@@ -186,34 +186,32 @@ def _load_smartrow_mac():
 def connecttosmartrow():
     logger.info("starting discovery")
 
-    # --- Fast path 1: SmartRow already in BlueZ device cache ---
-    # Use a short-lived manager just for the cache lookup; discard it before
-    # the real scan so its D-Bus state doesn't interfere.
+    # --- Fast path: SmartRow already in BlueZ device cache ---
+    # Check by alias ("SmartRow") or by previously cached MAC address.
+    # Only return early if BlueZ actually has the device object – if it
+    # doesn't, gatt.Device.connect() will fail with "Device does not exist"
+    # (BlueZ loses its device cache when the bluetooth service restarts).
     _probe = SmartRowManager(adapter_name='hci0')
     if not _probe.is_adapter_powered:
         logger.info("hci0 not powered – powering on")
         _probe.is_adapter_powered = True
         sleep(2)
+    cached_mac = _load_smartrow_mac()
     for device in _probe.devices():
         try:
             alias = device.alias()
         except Exception:
             alias = ""
         logger.info("known device: alias=%s mac=%s", alias, device.mac_address)
-        if alias == "SmartRow":
+        mac_match = cached_mac and device.mac_address.lower() == cached_mac.lower()
+        if alias == "SmartRow" or mac_match:
             logger.info("SmartRow already known to BlueZ: %s", device.mac_address)
             _save_smartrow_mac(device.mac_address)
+            del _probe
             return device.mac_address
     del _probe
-
-    # --- Fast path 2: cached MAC from a previous session ---
-    # With a known MAC, BlueZ can connect directly once SmartRow wakes up
-    # and starts advertising – no scan needed.
-    cached_mac = _load_smartrow_mac()
     if cached_mac:
-        logger.info("SmartRow MAC loaded from cache (%s) – skipping scan", cached_mac)
-        logger.info("pull the SmartRow handle to wake it up")
-        return cached_mac
+        logger.info("cached MAC %s not in BlueZ device cache – falling through to full scan", cached_mac)
 
     # --- Full scan: stop any stale discovery, then scan with a fresh manager ---
     # DO NOT power-cycle the adapter – on BCM43438 (Pi Zero W, UART bus) a
