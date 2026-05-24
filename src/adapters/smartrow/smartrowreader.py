@@ -184,17 +184,17 @@ def _load_smartrow_mac():
 
 
 def connecttosmartrow():
-    manager = SmartRowManager(adapter_name='hci0')
     logger.info("starting discovery")
 
-    # Ensure the adapter is powered on (may be off after a crash or service restart)
-    if not manager.is_adapter_powered:
+    # --- Fast path 1: SmartRow already in BlueZ device cache ---
+    # Use a short-lived manager just for the cache lookup; discard it before
+    # the real scan so its D-Bus state doesn't interfere.
+    _probe = SmartRowManager(adapter_name='hci0')
+    if not _probe.is_adapter_powered:
         logger.info("hci0 not powered – powering on")
-        manager.is_adapter_powered = True
-        sleep(1)
-
-    # Check BlueZ device cache first (fastest – no scan needed)
-    for device in manager.devices():
+        _probe.is_adapter_powered = True
+        sleep(2)
+    for device in _probe.devices():
         try:
             alias = device.alias()
         except Exception:
@@ -204,34 +204,34 @@ def connecttosmartrow():
             logger.info("SmartRow already known to BlueZ: %s", device.mac_address)
             _save_smartrow_mac(device.mac_address)
             return device.mac_address
+    del _probe
 
-    # Use MAC cached from a previous successful session – allows BlueZ to
-    # connect directly once SmartRow wakes up, without a full scan.
+    # --- Fast path 2: cached MAC from a previous session ---
+    # With a known MAC, BlueZ can connect directly once SmartRow wakes up
+    # and starts advertising – no scan needed.
     cached_mac = _load_smartrow_mac()
     if cached_mac:
         logger.info("SmartRow MAC loaded from cache (%s) – skipping scan", cached_mac)
-        logger.info("Waiting for SmartRow to advertise – pull the handle to wake it up")
+        logger.info("pull the SmartRow handle to wake it up")
         return cached_mac
 
-    # No cache: power-cycle hci0 to guarantee a clean BlueZ scan state.
-    # A previous session killed by SIGTERM leaves discovery running in BlueZ;
-    # stop_discovery() alone is not enough – BlueZ sometimes fails to restart
-    # scanning properly on an immediately-reused adapter context.
-    # Power-cycling takes ~2 s but makes the subsequent scan reliable.
-    logger.info("power-cycling hci0 to reset BlueZ adapter state")
+    # --- Full scan: stop any stale discovery, then scan with a fresh manager ---
+    # DO NOT power-cycle the adapter – on BCM43438 (Pi Zero W, UART bus) a
+    # D-Bus Powered=False/True can leave the chip unresponsive until the
+    # bluetooth service is restarted.  StopDiscovery + a brief pause is enough
+    # to reset BlueZ's discovery state cleanly.
     try:
-        manager.is_adapter_powered = False
-        sleep(1)
-        manager.is_adapter_powered = True
-        sleep(1)
-    except Exception as e:
-        logger.warning("power-cycle failed, trying stop/start instead: %s", e)
-        try:
-            manager.stop_discovery()
-        except Exception:
-            pass
-        sleep(1)
+        _stop_probe = SmartRowManager(adapter_name='hci0')
+        _stop_probe.stop_discovery()
+        logger.info("stopped stale discovery on hci0")
+        del _stop_probe
+    except Exception:
+        pass
+    sleep(2)  # give BlueZ time to fully process the stop before a new scan
 
+    # Fresh manager – created after the stale session is gone so all D-Bus
+    # proxy objects reflect the current adapter state.
+    manager = SmartRowManager(adapter_name='hci0')
     logger.info("starting BLE scan on hci0 – pull the SmartRow handle to wake it up")
     manager.start_discovery()
     manager.run()
