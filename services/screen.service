@@ -3,9 +3,9 @@ Description=PiRowFlo OLED screen, joystick and 3 buttons
 After=network.target
 
 [Service]
-User=#USER#
-Group=#USER#
-ExecStart=#PYTHON3# #REPO_DIR#/src/adapters/screen/oled.py
+User=pi
+Group=pi
+ExecStart=/home/pi/pirowflo/venv/bin/python3 /home/pi/pirowflo/src/adapters/screen/oled.py
 KillMode=process
 
 [Install]
