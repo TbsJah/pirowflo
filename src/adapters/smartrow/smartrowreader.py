@@ -194,14 +194,24 @@ def connecttosmartrow():
         logger.info("Waiting for SmartRow to advertise – pull the handle to wake it up")
         return cached_mac
 
-    # No cache: stop any stale discovery and do a fresh scan.
-    # gatt silently swallows InProgress but BlueZ won't re-emit already-seen
-    # devices to brand-new signal receivers, so we need a clean start.
+    # No cache: power-cycle hci0 to guarantee a clean BlueZ scan state.
+    # A previous session killed by SIGTERM leaves discovery running in BlueZ;
+    # stop_discovery() alone is not enough – BlueZ sometimes fails to restart
+    # scanning properly on an immediately-reused adapter context.
+    # Power-cycling takes ~2 s but makes the subsequent scan reliable.
+    logger.info("power-cycling hci0 to reset BlueZ adapter state")
     try:
-        manager.stop_discovery()
-        logger.info("stopped stale discovery on hci0")
-    except Exception:
-        pass  # Nothing was running – that's fine
+        manager.is_adapter_powered = False
+        sleep(1)
+        manager.is_adapter_powered = True
+        sleep(1)
+    except Exception as e:
+        logger.warning("power-cycle failed, trying stop/start instead: %s", e)
+        try:
+            manager.stop_discovery()
+        except Exception:
+            pass
+        sleep(1)
 
     logger.info("starting BLE scan on hci0 – pull the SmartRow handle to wake it up")
     manager.start_discovery()
