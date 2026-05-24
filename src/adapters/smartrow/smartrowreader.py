@@ -112,8 +112,12 @@ class SmartRowManager(gatt.DeviceManager):
             return self.discovered
         
     def device_discovered(self, device):
-        logger.info("discovered: alias=%s mac=%s", device.alias(), device.mac_address)
-        if device.alias() == "SmartRow":
+        try:
+            alias = device.alias()
+        except Exception:
+            return  # device properties not yet available, ignore
+        logger.info("discovered: alias=%s mac=%s", alias, device.mac_address)
+        if alias == "SmartRow":
             logging.info("found SmartRow")
             logging.info(device.mac_address)
             self.smartrowmac = device.mac_address
