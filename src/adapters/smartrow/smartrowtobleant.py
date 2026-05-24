@@ -108,7 +108,10 @@ class DataLogger():
                 self.WRValues.update({'stroke_rate': 0})
             else:
                 self.WRValues.update({'stroke_rate': float((event[6:8]))*2})
-            self.WRValues.update({'total_strokes':int((event[9:13]))})
+            try:
+                self.WRValues.update({'total_strokes': int((event[9:13]))})
+            except ValueError:
+                logger.warning("STROKE_RATE_MESSAGE: could not parse total_strokes from %r", event[9:13])
             self.elapsedtime()
 
         if event[0] == self.PACE_MESSAGE:
@@ -120,11 +123,11 @@ class DataLogger():
                 self.WRValues.update({'speed': 0})
             else:
                 self.WRValues.update({'instantaneous pace': pace_inst})
-            if pace_inst != 0:
-                speed = int(500 * 100 / pace_inst) # speed in cm/s
-                self.WRValues.update({'speed': speed})
-            else:
-                self.WRValues.update({'speed': 0})
+                if pace_inst != 0:
+                    speed = int(500 * 100 / pace_inst) # speed in cm/s
+                    self.WRValues.update({'speed': speed})
+                else:
+                    self.WRValues.update({'speed': 0})
             pace_avg = int(event[9])*60 + int(event[10:12])
             self.WRValues.update({'pace_avg': pace_avg})
             self.elapsedtime()
@@ -132,20 +135,22 @@ class DataLogger():
         if event[0] == self.FORCE_MESSAGE:
             event = event.replace(" ", "0")
             self.WRValues.update({'total_distance_m': int((event[1:6]))})
-            self.WRValues.update({'force': int((event[7:11]))})
             if event[11] == "!":
+                self.WRValues.update({'force': 0})
                 self.SmartRowHalt = True
                 self.fullstop = True
-            elif self.starttime == None:
-                self.starttime = time.time()
-                self.SmartRowHalt = False
-                self.fullstop = False
             else:
-                self.SmartRowHalt = False
-                self.fullstop = False
+                self.WRValues.update({'force': int((event[7:11]))})
+                if self.starttime == None:
+                    self.starttime = time.time()
+                    self.SmartRowHalt = False
+                    self.fullstop = False
+                else:
+                    self.SmartRowHalt = False
+                    self.fullstop = False
             self.elapsedtime()
 
-        print(self.WRValues)
+        logger.debug(self.WRValues)
 
 
 def connectSR(manager,smartrow):
