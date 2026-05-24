@@ -143,12 +143,22 @@ def connecttosmartrow():
     manager = SmartRowManager(adapter_name='hci0')
     logger.info("starting discovery")
 
-    # Device may already be known from BlueZ cache (found during __init__)
-    if manager.ready():
-        logger.info("SmartRow found in BlueZ cache: %s", manager.smartrowmac)
-        return manager.smartrowmac
+    # Ensure the adapter is powered on (may be off after a crash or service restart)
+    if not manager.is_adapter_powered:
+        logger.info("hci0 not powered – powering on")
+        manager.is_adapter_powered = True
+        time.sleep(1)
 
-    # Also check device list directly
+    # Stop any stale discovery that a previous (crashed) run may have left on hci0.
+    # gatt silently swallows InProgress but BlueZ won't re-emit already-seen devices
+    # when the signal receivers are brand-new, so we need a clean start.
+    try:
+        manager.stop_discovery()
+        logger.info("stopped stale discovery on hci0")
+    except Exception:
+        pass  # Nothing was running – that's fine
+
+    # Also check device list directly (BlueZ cache from a previous scan)
     for device in manager.devices():
         try:
             alias = device.alias()
